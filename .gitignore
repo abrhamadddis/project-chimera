@@ -1,0 +1,21 @@
+# Environment variables (secrets)
+.env
+.env.local
+
+# Java build artifacts
+target/
+*.class
+*.jar
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
