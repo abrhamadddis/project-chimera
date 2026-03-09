@@ -1,0 +1,449 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Project identity
+         Traces to: specs/technical.md §5.1, Constitution Principle I (Java 21+)
+    ───────────────────────────────────────────────────────────────────────── -->
+    <groupId>org.chimera</groupId>
+    <artifactId>project-chimera</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Project Chimera</name>
+    <description>
+        Autonomous AI influencer agent swarm platform.
+        Planner-Worker-Judge architecture with MCP integration.
+        Traces to specs/_meta.md (Project Vision).
+    </description>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Spring Boot parent — manages dependency versions for Spring ecosystem.
+         specs/technical.md §5.1: Spring Boot 3.3 minimum.
+    ───────────────────────────────────────────────────────────────────────── -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Global properties
+    ───────────────────────────────────────────────────────────────────────── -->
+    <properties>
+        <!-- Java 21 LTS — Constitution Principle I (NON-NEGOTIABLE) -->
+        <java.version>21</java.version>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
+
+        <!-- Enable Java 21 preview features (Virtual Thread structured concurrency APIs) -->
+        <!-- specs/technical.md §5.1: StructuredTaskScope GA in Java 21 -->
+        <maven.compiler.enablePreviewFeatures>true</maven.compiler.enablePreviewFeatures>
+
+        <!-- Encoding -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- Dependency versions — specs/technical.md §5.2–§5.4 -->
+        <jedis.version>5.1.5</jedis.version>
+        <weaviate-client.version>4.7.0</weaviate-client.version>
+        <jackson.version>2.17.2</jackson.version>
+        <junit-jupiter.version>5.11.2</junit-jupiter.version>
+        <mockito.version>5.13.0</mockito.version>
+        <assertj.version>3.26.3</assertj.version>
+        <testcontainers.version>1.20.3</testcontainers.version>
+        <jspecify.version>1.0.0</jspecify.version>
+        <postgresql.version>42.7.4</postgresql.version>
+
+        <!-- Plugin versions — specs/technical.md §5.4 -->
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.1</maven-surefire-plugin.version>
+        <checkstyle-plugin.version>3.5.0</checkstyle-plugin.version>
+        <checkstyle.version>10.18.2</checkstyle.version>
+        <jacoco-plugin.version>0.8.12</jacoco-plugin.version>
+    </properties>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Dependencies
+    ───────────────────────────────────────────────────────────────────────── -->
+    <dependencies>
+
+        <!-- ── Spring Boot ─────────────────────────────────────────────────
+             specs/technical.md §5.1: Spring Boot 3.3 — DI, web layer, actuator.
+             Virtual Threads enabled via application.yml:
+               spring.threads.virtual.enabled=true
+        ──────────────────────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <!-- Provides @Version for OCC on global_state (specs/technical.md §3.1) -->
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <!-- Health endpoints for Kubernetes liveness/readiness probes -->
+        </dependency>
+
+        <!-- ── Data layer ──────────────────────────────────────────────────
+             specs/technical.md §5.2
+        ──────────────────────────────────────────────────────────────────── -->
+
+        <!-- PostgreSQL JDBC — system of record (specs/technical.md §3.1) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Jedis 5.x — Redis client for task queue, spend counter, episodic cache -->
+        <!-- specs/technical.md §3.2: LPUSH, RPOP, BRPOP, INCRBY, Lua scripting -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${jedis.version}</version>
+        </dependency>
+
+        <!-- Weaviate Java Client 4.x — semantic long-term memory -->
+        <!-- specs/technical.md §3.3: hybrid vector + BM25, alpha=0.75 -->
+        <dependency>
+            <groupId>io.weaviate</groupId>
+            <artifactId>client</artifactId>
+            <version>${weaviate-client.version}</version>
+        </dependency>
+
+        <!-- Jackson Databind 2.17 — JSON serialisation for all inter-service payloads -->
+        <!-- specs/technical.md §1: snake_case wire format via SnakeCaseStrategy -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Jackson JSR-310 — Instant / ZonedDateTime support (required for all timestamps) -->
+        <!-- specs/technical.md §5.2: Jackson Datatype JSR310 2.17 minimum -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- Jackson ParameterNames — enables Jackson to read Record component names -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.module</groupId>
+            <artifactId>jackson-module-parameter-names</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- ── Nullability annotations ────────────────────────────────────
+             specs/technical.md §2: @Nullable from org.jspecify.annotations
+        ──────────────────────────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <version>${jspecify.version}</version>
+        </dependency>
+
+        <!-- ── Testing ────────────────────────────────────────────────────
+             specs/technical.md §5.4, Constitution Principle VI (JUnit 5, TDD)
+             All test dependencies scoped to 'test' — never in production code.
+        ──────────────────────────────────────────────────────────────────── -->
+
+        <!-- JUnit 5 Jupiter — sole test framework; no JUnit 4 in new code -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-params</artifactId>
+            <version>${junit-jupiter.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Mockito 5.x — mock MCP servers and external dependencies -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- AssertJ 3.26 — fluent assertions; preferred over assertEquals -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Testcontainers 1.20 — ephemeral PostgreSQL, Redis, Weaviate for integration tests -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Spring Boot Test — MockMvc, @SpringBootTest, TestRestTemplate -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+            <exclusions>
+                <!-- Exclude JUnit 4 Vintage engine — Constitution Principle VI: JUnit 5 only -->
+                <exclusion>
+                    <groupId>org.junit.vintage</groupId>
+                    <artifactId>junit-vintage-engine</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+    </dependencies>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Build plugins
+    ───────────────────────────────────────────────────────────────────────── -->
+    <build>
+        <plugins>
+
+            <!-- ── maven-compiler-plugin ───────────────────────────────────
+                 Java 21, preview features enabled for StructuredTaskScope.
+                 specs/technical.md §5.1: Virtual Threads, Records, pattern matching.
+                 Constitution Principle V: StructuredTaskScope for fan-out / fan-in.
+            ──────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <release>21</release>
+                    <!-- Preview features: StructuredTaskScope (structured concurrency) -->
+                    <enablePreviewFeatures>true</enablePreviewFeatures>
+                    <compilerArgs>
+                        <arg>--enable-preview</arg>
+                        <!-- Enforce Records for DTOs: flag raw class usage where Record is expected -->
+                        <arg>-Xlint:all</arg>
+                        <arg>-Xlint:-preview</arg>
+                    </compilerArgs>
+                    <annotationProcessorPaths>
+                        <!-- Retain parameter names in bytecode for Jackson Record mapping -->
+                        <path>
+                            <groupId>com.fasterxml.jackson.module</groupId>
+                            <artifactId>jackson-module-parameter-names</artifactId>
+                            <version>${jackson.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+
+            <!-- ── maven-surefire-plugin ───────────────────────────────────
+                 JUnit 5 test runner. Preview features forwarded to JVM so
+                 Virtual Thread APIs compile and run correctly in tests.
+                 specs/technical.md §5.4: JUnit Jupiter 5.11 minimum.
+            ──────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+                <configuration>
+                    <!-- Forward --enable-preview so test JVM matches compiler output -->
+                    <argLine>
+                        --enable-preview
+                        -Djdk.virtualThreadScheduler.parallelism=4
+                    </argLine>
+                    <!-- JUnit 5 provider — explicit so surefire doesn't fall back to JUnit 4 -->
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <!-- Fail build on test failure; no silent skips -->
+                    <failIfNoTests>false</failIfNoTests>
+                    <!-- Display full test output in CI logs -->
+                    <useFile>false</useFile>
+                    <trimStackTrace>false</trimStackTrace>
+                </configuration>
+            </plugin>
+
+            <!-- ── maven-checkstyle-plugin ─────────────────────────────────
+                 Enforces Constitution Principle I style rules:
+                   - No direct SDK imports in Worker business logic
+                   - Records for all DTOs
+                   - No JUnit 4 imports
+                 specs/technical.md §5.4: Checkstyle 10.x minimum.
+                 Config file: checkstyle.xml at project root.
+            ──────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>${checkstyle-plugin.version}</version>
+                <dependencies>
+                    <!-- Pin Checkstyle version independent of plugin version -->
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>${checkstyle.version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>checkstyle.xml</configLocation>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>true</failsOnError>
+                    <failOnViolation>true</failOnViolation>
+                    <includeTestSourceDirectory>false</includeTestSourceDirectory>
+                    <violationSeverity>warning</violationSeverity>
+                    <linkXRef>false</linkXRef>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>checkstyle-verify</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ── jacoco-maven-plugin ─────────────────────────────────────
+                 Code coverage gate: must not regress below baseline.
+                 specs/technical.md §5.4: JaCoCo 0.8 minimum.
+                 Constitution Principle VI: coverage baseline defined per feature in plan.md.
+            ──────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Append JaCoCo agent args to surefire argLine -->
+                            <propertyName>surefireArgLine</propertyName>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <!-- Baseline: 80% line coverage (raise per-feature in plan.md) -->
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.75</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- ── spring-boot-maven-plugin ────────────────────────────────
+                 Produces an executable fat JAR for Docker packaging.
+                 specs/technical.md §5.5: Docker 25; every service ships as image.
+            ──────────────────────────────────────────────────────────────── -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <!-- Remove Lombok from fat JAR if ever added -->
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
+    <!-- ─────────────────────────────────────────────────────────────────────
+         Reporting (mvn site)
+    ───────────────────────────────────────────────────────────────────────── -->
+    <reporting>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>${checkstyle-plugin.version}</version>
+                <configuration>
+                    <configLocation>checkstyle.xml</configLocation>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco-plugin.version}</version>
+            </plugin>
+        </plugins>
+    </reporting>
+
+</project>

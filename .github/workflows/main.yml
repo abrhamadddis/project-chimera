@@ -1,0 +1,165 @@
+# Project Chimera — CI Pipeline
+# Traces to: specs/technical.md §5.4 (JUnit 5, Checkstyle, JaCoCo)
+#            Constitution Principle VI (TDD — failing tests block merge)
+#            Constitution Principle I (Java 21 LTS mandatory)
+#
+# Triggers on every push and pull request targeting main.
+# All jobs must pass before a PR is eligible for merge.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Cancel in-flight runs for the same branch/PR when a new commit is pushed.
+# Prevents stale runs consuming runner minutes without affecting main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # build-and-test
+  # Compiles the project, runs the full JUnit 5 suite, and enforces Checkstyle.
+  # Constitution Principle VI: Red-Green-Refactor; failing tests block merge.
+  # ───────────────────────────────────────────────────────────────────────────
+  build-and-test:
+    name: Build, Test & Lint
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read        # checkout
+      pull-requests: write  # post failure comment on PR
+
+    steps:
+
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for accurate blame in Checkstyle reports
+
+      # ── 2. Set up Java 21 ──────────────────────────────────────────────────
+      # specs/technical.md §5.1: OpenJDK 21 LTS — Constitution Principle I (NON-NEGOTIABLE)
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin        # Eclipse Temurin — production-grade OpenJDK build
+          java-version: '21'
+          cache: maven                 # cache ~/.m2/repository across runs
+
+      # ── 3. Verify Java version ─────────────────────────────────────────────
+      - name: Confirm Java 21 runtime
+        run: |
+          java -version
+          mvn -version
+
+      # ── 4. Spec check ──────────────────────────────────────────────────────
+      # Constitution Principle II: no implementation without an approved spec.
+      # Fail fast if required spec files are absent before spending compile time.
+      - name: Check specs alignment
+        run: make spec-check
+
+      # ── 5. Setup (compile + install, skip tests) ───────────────────────────
+      - name: Setup — compile and install dependencies
+        run: make setup
+
+      # ── 6. Test ────────────────────────────────────────────────────────────
+      # Constitution Principle VI: all JUnit 5 tests must pass.
+      # Virtual Thread scheduler parallelism set in pom.xml surefire argLine.
+      - name: Run test suite
+        id: run-tests
+        run: make test
+
+      # ── 7. Upload test reports (always — even on failure) ──────────────────
+      - name: Upload Surefire test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 14
+
+      # ── 8. Upload JaCoCo coverage report ──────────────────────────────────
+      - name: Upload JaCoCo coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          retention-days: 14
+
+      # ── 9. Lint (Checkstyle) ───────────────────────────────────────────────
+      # specs/technical.md §5.4: Checkstyle 10.x
+      # Catches: direct SDK imports in Worker logic, non-Record DTOs, JUnit 4 usage.
+      - name: Run Checkstyle lint
+        id: run-lint
+        run: make lint
+
+      # ── 10. Comment on PR if tests or lint fail ────────────────────────────
+      # Posts a structured failure comment so reviewers see the failure reason
+      # inline on the PR without navigating to the Actions tab.
+      - name: Comment on PR — test or lint failure
+        if: |
+          failure() &&
+          github.event_name == 'pull_request' &&
+          (steps.run-tests.outcome == 'failure' || steps.run-lint.outcome == 'failure')
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const testFailed = '${{ steps.run-tests.outcome }}' === 'failure';
+            const lintFailed = '${{ steps.run-lint.outcome }}' === 'failure';
+
+            const lines = [
+              '## CI Failure — Project Chimera',
+              '',
+              '| Check | Result |',
+              '|---|---|',
+              `| Spec alignment | ${{ steps.run-tests.outcome != 'skipped' && '✓' || '—' }} |`,
+              `| Build (make setup) | ✓ |`,
+              `| Tests (make test) | ${testFailed ? '✗ **FAILED**' : '✓'} |`,
+              `| Lint (make lint) | ${lintFailed ? '✗ **FAILED**' : '✓'} |`,
+              '',
+            ];
+
+            if (testFailed) {
+              lines.push(
+                '### Test failure',
+                'Download the **surefire-reports** artifact from the Actions run for full output.',
+                '',
+                '> Constitution Principle VI: failing tests block merge.',
+                '',
+              );
+            }
+
+            if (lintFailed) {
+              lines.push(
+                '### Checkstyle violation',
+                'Common causes:',
+                '- Direct SDK import in Worker or Service class (use MCP layer — Constitution Principle IV)',
+                '- DTO defined as a plain class instead of a Java Record (Constitution Principle I)',
+                '- JUnit 4 annotation used (`@Test` from `org.junit` — must be `org.junit.jupiter.api`)',
+                '',
+                'Run `make lint` locally and fix all reported violations before re-pushing.',
+                '',
+              );
+            }
+
+            lines.push(
+              '---',
+              `_Workflow run: [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_`,
+            );
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: lines.join('\n'),
+            });

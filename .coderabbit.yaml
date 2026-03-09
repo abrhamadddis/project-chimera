@@ -1,0 +1,175 @@
+# Project Chimera — CodeRabbit AI Review Configuration
+# Traces to: Constitution Principles I–VI, specs/technical.md, specs/functional.md
+#
+# CodeRabbit performs automated code review on every PR.
+# Review findings are instructive — they explain the rule and how to fix it,
+# not just flag the violation.
+#
+# Docs: https://docs.coderabbit.ai/configure/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Language & tone
+# ─────────────────────────────────────────────────────────────────────────────
+language: en-US
+
+tone_instructions: |
+  Review tone is instructive. For every violation:
+  1. State clearly what rule was broken and which spec or constitution principle it traces to.
+  2. Explain why the rule exists (one sentence).
+  3. Show the corrected pattern as a code snippet where possible.
+  Do not use dismissive language. Assume the author is competent and may not have
+  read the full constitution. Every comment should leave the author better informed,
+  not just corrected.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reviews
+# ─────────────────────────────────────────────────────────────────────────────
+reviews:
+  # Post an AI-generated summary on every PR describing what changed and why.
+  # Helps reviewers orient before reading the diff.
+  auto_summary: true
+
+  # Request changes (not just comments) when a blocking rule is violated.
+  # Constitution Principle VI: failing checks must block merge.
+  request_changes_workflow: true
+
+  # Run review on draft PRs so authors get feedback early.
+  draft: true
+
+  # Collapse resolved conversations to reduce noise.
+  collapse_walkthrough: false
+
+  # ── Review profile ─────────────────────────────────────────────────────────
+  # "assertive" catches more issues at the cost of more noise.
+  # "chill" reduces noise but may miss architectural violations.
+  # "assertive" is correct for this project — constitution violations must surface.
+  profile: assertive
+
+  # ── Path filters ──────────────────────────────────────────────────────────
+  # Exclude generated files, migration scripts, and static assets from review.
+  path_filters:
+    - "!target/**"
+    - "!**/*.class"
+    - "!**/*.jar"
+    - "!db/migration/V*__*.sql"   # Flyway migrations reviewed separately
+    - "!docs/**"
+    - "!skills/**/README.md"
+
+  # ── Auto-summary detail level ─────────────────────────────────────────────
+  summary_walkthrough: true
+
+  # ── Finishing touches ─────────────────────────────────────────────────────
+  # Suggest commit message improvements aligned with project conventions.
+  commit_message_review: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Custom review instructions — the five AI review policies
+# Each policy maps to a constitution principle and spec reference.
+# ─────────────────────────────────────────────────────────────────────────────
+custom_instructions: |
+
+  ## Policy 1 — Spec Alignment
+  Traces to: Constitution Principle II (NON-NEGOTIABLE), specs/_meta.md §6 Rule 7
+
+  For every new class, method, or interface introduced:
+  - Verify there is a corresponding User Story in specs/functional.md or a schema
+    definition in specs/technical.md that justifies this code.
+  - If no spec reference exists, flag the code as a constitution violation with:
+    "This code has no backing spec. Constitution Principle II requires Spec → Plan → Tasks →
+    Implementation. Add a spec reference comment (e.g. // specs/functional.md US-2.3) or
+    raise a spec amendment before merging."
+  - Check that acceptance criteria in the spec are satisfied by the implementation.
+    Flag any acceptance criterion that is not covered by at least one test.
+
+  ## Policy 2 — Java Thread Safety and Virtual Threads
+  Traces to: Constitution Principle V, specs/technical.md §5.1
+
+  Flag any of the following:
+  - `Executors.newFixedThreadPool()`, `newCachedThreadPool()`, or `new Thread()` used for
+    I/O-bound work. Required pattern: `Executors.newVirtualThreadPerTaskExecutor()`.
+    Reason: Platform thread pools do not scale to 1,000 concurrent agents; Virtual Threads
+    (Project Loom, GA in Java 21) eliminate this constraint.
+  - Fan-out / fan-in concurrency that does not use `StructuredTaskScope.ShutdownOnFailure`
+    or `ShutdownOnSuccess`. Reason: Structured Concurrency prevents orphaned threads and
+    makes lifecycle management auditable (Constitution Principle V).
+  - Shared mutable state (non-final fields, mutable collections passed between threads)
+    without explicit `java.util.concurrent` protection. Records and unmodifiable collections
+    are the preferred solution.
+  - `synchronized` blocks on classes that could be replaced with immutable Records or
+    `java.util.concurrent.atomic.*` primitives.
+
+  ## Policy 3 — Security Vulnerabilities
+  Traces to: specs/_meta.md §6 Rules 1, 5; specs/technical.md §5.5; CLAUDE.md §3.7
+
+  Flag any of the following as blocking violations:
+  - Private key or secret material stored as `String`. Required pattern: `char[]` with
+    explicit zeroing after use. Reason: Strings are interned and cannot be zeroed;
+    private keys must never appear in heap dumps or GC logs
+    (specs/_meta.md §6 Rule 1, specs/technical.md §5.5).
+  - Hardcoded credentials, API keys, tokens, or wallet addresses in source code or
+    `application.yml`. All secrets must be retrieved from AWS Secrets Manager or
+    HashiCorp Vault at runtime using the path `chimera/agent/{agent_id}/wallet_key`.
+  - SQL string concatenation (use parameterised queries / JPA criteria only).
+  - `ProcessBuilder` or `Runtime.exec()` calls that interpolate user-supplied values
+    into a shell command string (command injection — OWASP A03).
+  - `context.sanitized = true` set manually without the full 4-stage injection defence
+    pipeline having executed (specs/functional.md US-2.4).
+  - Any import of `com.anthropic`, `openai`, or provider-specific SDK in a Worker,
+    Service, or domain class. All external calls must route through MCP (Policy 5).
+
+  ## Policy 4 — Immutability and Java Records
+  Traces to: Constitution Principle I, specs/technical.md §2
+
+  Flag any of the following:
+  - A DTO, domain object, or inter-agent payload defined as a plain class with getters
+    and setters instead of a Java 21 Record. Required: all DTOs in `org.chimera.domain`
+    and `org.chimera.skills` must be Records.
+  - A Java Record whose compact constructor does not validate non-null fields via
+    `Objects.requireNonNull()`. Every required field must be validated at construction
+    time so invariants cannot be violated post-construction.
+  - A Record compact constructor that catches and swallows exceptions rather than
+    throwing `IllegalArgumentException` with a descriptive message.
+  - Collections stored in Records that are not wrapped with `List.copyOf()`,
+    `Set.copyOf()`, or `Collections.unmodifiableList()`. Records are structurally
+    immutable but their collection fields are mutable unless explicitly protected.
+  - Use of `@Data`, `@Value`, `@Builder` (Lombok) or similar annotation processors
+    that generate mutable boilerplate. Lombok is not a dependency of this project
+    and must not be introduced.
+
+  ## Policy 5 — MCP Compliance
+  Traces to: Constitution Principle IV (NON-NEGOTIABLE), specs/technical.md §1.3,
+             specs/functional.md US-4.1, US-5.2
+
+  Flag any of the following as blocking violations:
+  - Any import in a Worker, Service, or domain class from:
+      com.anthropic.*, openai.*, com.twitter.*, com.instagram.*,
+      io.coinbase.*, io.weaviate.* (outside the dedicated MCP adapter layer)
+    Reason: Constitution Principle IV mandates that all external service integrations
+    are encapsulated in dedicated MCP server adapters. Provider SDKs must never appear
+    in business-logic modules.
+  - An `MCPToolCall` constructed without a `caller_task_id` field. Every tool invocation
+    must be traceable to an originating `AgentTask` for audit linkage
+    (specs/technical.md §1.3).
+  - An `MCPToolCall` to `mcp-server-coinbase` constructed anywhere outside the
+    `CfoSubJudgeService`. Workers have no direct access to financial MCP tools
+    (specs/functional.md US-5.2).
+  - A Worker that writes directly to PostgreSQL (via JPA repository or JDBC).
+    Workers read from Weaviate and Redis; they never write to PostgreSQL directly
+    (specs/functional.md US-6.2).
+  - An `MCPToolCall.disclosureLevel` set to a value other than `automated` or `assisted`.
+    The value must reflect the actual approval path, not a default
+    (specs/technical.md §1.3, specs/functional.md US-4.1).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat — allow authors to ask CodeRabbit questions inline on the PR
+# ─────────────────────────────────────────────────────────────────────────────
+chat:
+  auto_reply: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowledge base — files CodeRabbit indexes for project context
+# ─────────────────────────────────────────────────────────────────────────────
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: local   # learnings stay within this repo, not shared across org
