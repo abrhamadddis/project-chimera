@@ -196,4 +196,18 @@ NOT be merged. Complexity violations MUST be justified in the Complexity
 Tracking table of `plan.md`. Use `CLAUDE.md` for runtime agent-development
 guidance specific to the AI coding assistant.
 
-**Version**: 1.0.0 | **Ratified**: 2026-03-08 | **Last Amended**: 2026-03-08
+**Version**: 1.1.0 | **Ratified**: 2026-03-08 | **Last Amended**: 2026-03-09
+
+---
+
+## Spec References
+
+All project specifications are located in the `/specs` directory:
+
+- `specs/_meta.md` — Project vision and constraints
+- `specs/functional.md` — User stories and acceptance criteria
+- `specs/technical.md` — API contracts, data models, database schema
+- `specs/openclaw_integration.md` — OpenClaw network integration plan
+
+**The Prime Directive**: NEVER generate implementation code without first reading the
+relevant spec file.
